@@ -1,0 +1,63 @@
+          {antenna}
+        .-----.
+        {eyes}
+     .--{joint}|___|{joint}--.
+     | |{panel}| |
+       {joint}|   |{joint}
+      {left_foot}   {right_foot}
+---
+       {antenna}
+    .--{eyes}--.
+   /|         |\
+  / |{panel}| \
+ '==|=========|=='
+   /_/ /_/ /_/
+  <===========>
+---
+          {antenna}
+       .-'''''''-.
+      /  {eyes}  \
+  ---{joint} |{panel}| {joint}---
+      \   ___   /
+       '-.___.-'
+          {joint}
+---
+         {antenna}
+      .-{eyes}-.
+     /|{panel}|\
+  __/{joint}|_____|{joint}\__
+ /  / |     | \  \
+/__/  /       \  \_\
+  \_/         \_/
+---
+         {antenna}
+       .-{eyes}-.
+       |{panel}|
+     --{joint}|-----|{joint}--
+       |     |
+       | | | |
+       {left_foot} {right_foot}
+---
+            {antenna}
+     .----{eyes}----.
+ {joint}===|{panel}|==={joint}
+     |           |
+     '-----+-----'
+       /   |   \
+     {left_foot}       {right_foot}
+---
+         {antenna}
+      .--{eyes}--.
+   ~~~{joint}|{panel}|{joint}~~~
+      '-------'
+       .-===-.
+     .'.     .' .
+        '---'
+---
+    {antenna}
+ .--{eyes}---------.
+ |{panel}|{joint}|{joint}|
+ '---+-----------'
+   _/|_/|_/|_/|_
+  / / / / / / / /
+ <=============== >

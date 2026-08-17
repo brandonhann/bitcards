@@ -1,0 +1,27 @@
+# Rust build output
+/target/
+**/*.rs.bk
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.local
+/keys/
+/secrets/
+
+# Future local node state
+/data/
+/bitcards-data/
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Local logs
+*.log
