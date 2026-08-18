@@ -2,10 +2,9 @@ use bitcards::{
     canonical::hash_hex,
     generator::{CURRENT_GENERATOR_VERSION, CardGenerator},
     model::CardClass,
-    renderer,
+    promo_preview, renderer,
+    support_preview::{self, SupportKind},
 };
-use std::io::IsTerminal;
-
 fn main() {
     if let Err(message) = run() {
         eprintln!("error: {message}");
@@ -14,10 +13,22 @@ fn main() {
 }
 fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|argument| argument == "--help") {
+        println!("{}", usage());
+        return Ok(());
+    }
     if args.first().map(String::as_str) == Some("card")
         && args.get(1).map(String::as_str) == Some("gallery")
     {
         return run_gallery(&args[2..]);
+    }
+    if args.first().map(String::as_str) == Some("card") {
+        match args.get(1).map(String::as_str) {
+            Some("command-gallery") => return run_support_gallery(&args[2..], false),
+            Some("charge-gallery") => return run_support_gallery(&args[2..], true),
+            Some("promo-gallery") => return run_promo_gallery(&args[2..]),
+            _ => {}
+        }
     }
     if args.first().map(String::as_str) != Some("card")
         || args.get(1).map(String::as_str) != Some("generate")
@@ -28,7 +39,6 @@ fn run() -> Result<(), String> {
     let mut set_seed = None;
     let mut type_seed = None;
     let mut metadata = false;
-    let mut color = None;
     let mut rarity_preview = None;
     let mut finish_preview = None;
     let mut set_id = 1;
@@ -48,8 +58,6 @@ fn run() -> Result<(), String> {
                     .map_err(|_| "version must be an integer".to_string())?
             }
             "--metadata" => metadata = true,
-            "--color" => color = Some(true),
-            "--no-color" => color = Some(false),
             "--rarity-preview" => {
                 rarity_preview = Some(match value(&args, &mut index)?.as_str() {
                     "common" => renderer::RarityPreview::Common,
@@ -119,8 +127,6 @@ fn run() -> Result<(), String> {
     let card = CardGenerator::default()
         .generate(version, &set, &kind)
         .map_err(|error| format!("generation failed: {error:?}"))?;
-    let use_color = std::env::var_os("NO_COLOR").is_none()
-        && color.unwrap_or_else(|| std::io::stdout().is_terminal());
     let preview = finish_preview.or(rarity_preview);
     if card_number == 0 || card_number > set_size {
         return Err("card number must be between 1 and the Set size".into());
@@ -135,16 +141,10 @@ fn run() -> Result<(), String> {
         number: card_number,
         total: set_size,
     };
-    let front = if let (true, Some(preview)) = (use_color, preview) {
+    let front = if let Some(preview) = preview {
         renderer::render_catalog_preview(&card, Some(set_id), Some(serial), catalog, preview)
     } else {
-        renderer::render_with_catalog_identity(
-            &card,
-            Some(set_id),
-            Some(serial),
-            catalog,
-            use_color,
-        )
+        renderer::render_with_catalog_identity(&card, Some(set_id), Some(serial), catalog, true)
     };
     println!(
         "{}",
@@ -214,6 +214,92 @@ fn run_gallery(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn run_support_gallery(args: &[String], charge_gallery: bool) -> Result<(), String> {
+    if !args.is_empty() {
+        let command = if charge_gallery {
+            "charge-gallery"
+        } else {
+            "command-gallery"
+        };
+        return Err(format!("usage: bitcards card {command}"));
+    }
+    let kinds: &[SupportKind] = if charge_gallery {
+        &SupportKind::CHARGES
+    } else {
+        &SupportKind::COMMANDS
+    };
+    let label = if charge_gallery { "Charge" } else { "Command" };
+    println!(
+        "{label} gallery: {} fixed card types, 3 finishes each",
+        kinds.len()
+    );
+    let rendered: Vec<_> = kinds
+        .iter()
+        .copied()
+        .enumerate()
+        .flat_map(|(index, kind)| {
+            let card = support_preview::generate(kind);
+            let finishes: &[(&str, renderer::SupportFinish)] = if charge_gallery {
+                &[
+                    ("STANDARD", renderer::SupportFinish::Standard),
+                    ("RARE PULSE", renderer::SupportFinish::Rare),
+                    ("SUPER RARE OVERCHARGED", renderer::SupportFinish::SuperRare),
+                ]
+            } else {
+                &[
+                    ("STANDARD", renderer::SupportFinish::Standard),
+                    ("RARE CRT", renderer::SupportFinish::Rare),
+                    ("SUPER RARE ROOT", renderer::SupportFinish::SuperRare),
+                ]
+            };
+            finishes.iter().map(move |(finish_name, finish)| {
+                (
+                    format!("{} • {finish_name}", card.name),
+                    renderer::render_support_preview_with_identity_and_finish(
+                        &card,
+                        true,
+                        u16::try_from(index + 1).expect("gallery is small"),
+                        1,
+                        1,
+                        *finish,
+                    ),
+                )
+            })
+        })
+        .collect();
+    for row in rendered.chunks(3) {
+        print_gallery_row(row);
+    }
+    Ok(())
+}
+
+fn run_promo_gallery(args: &[String]) -> Result<(), String> {
+    if !args.is_empty() {
+        return Err("usage: bitcards card promo-gallery".into());
+    }
+    let promos = promo_preview::set_one_promos();
+    println!("Promo gallery: {} fixed launch promo", promos.len());
+    let rendered: Vec<_> = promos
+        .iter()
+        .enumerate()
+        .map(|(index, card)| {
+            (
+                format!("PROMO {:02} • {}", index + 1, card.name),
+                renderer::render_promo_preview(
+                    card,
+                    1,
+                    1,
+                    u16::try_from(index + 1).expect("promo gallery is small"),
+                ),
+            )
+        })
+        .collect();
+    for row in rendered.chunks(3) {
+        print_gallery_row(row);
+    }
+    Ok(())
+}
+
 fn fresh_gallery_seed() -> Vec<u8> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -225,12 +311,12 @@ fn fresh_gallery_seed() -> Vec<u8> {
     seed.extend_from_slice(&std::process::id().to_be_bytes());
     seed
 }
-fn print_gallery_row(cards: &[(&str, String)]) {
+fn print_gallery_row<L: AsRef<str>>(cards: &[(L, String)]) {
     println!(
         "{}",
         cards
             .iter()
-            .map(|(label, _)| format!("{label:^34}"))
+            .map(|(label, _)| format!("{:^34}", label.as_ref()))
             .collect::<Vec<_>>()
             .join("   ")
     );
@@ -238,7 +324,7 @@ fn print_gallery_row(cards: &[(&str, String)]) {
         .iter()
         .map(|(_, card)| card.lines().collect())
         .collect();
-    for row in 0..24 {
+    for row in 0..renderer::CARD_HEIGHT {
         println!(
             "{}",
             rows.iter()
@@ -272,5 +358,5 @@ fn bytes_hex(value: &[u8]) -> String {
     value.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 fn usage() -> String {
-    "usage: bitcards card generate --seed <hex> [--finish-preview standard|holo|reverse-holo|gold|rainbow-holo] [--color|--no-color] [--set-id <1-99>] [--card-number <1-999>] [--set-size <1-999>] [--serial <1-999999>] [--version 1] [--metadata]\n   or: bitcards card generate --set-seed <hex> --type-seed <hex> [--finish-preview standard|holo|reverse-holo|gold|rainbow-holo] [--color|--no-color] [--set-id <1-99>] [--card-number <1-999>] [--set-size <1-999>] [--serial <1-999999>]".into()
+    "usage: bitcards card generate --seed <hex> [--finish-preview standard|holo|reverse-holo|gold|rainbow-holo] [--set-id <1-99>] [--card-number <1-999>] [--set-size <1-999>] [--serial <1-999999>] [--version 1|2] [--metadata]\n   or: bitcards card generate --set-seed <hex> --type-seed <hex> [options]\n   or: bitcards card gallery [--seed <hex>]\n   or: bitcards card command-gallery\n   or: bitcards card charge-gallery\n   or: bitcards card promo-gallery".into()
 }

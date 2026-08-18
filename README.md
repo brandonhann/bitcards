@@ -41,9 +41,8 @@ Markdown preserves terminal artwork in fenced text blocks:
 ╚════════════════════════════════╝
 ```
 
-The CLI renders a generated front and the universal card back side by side. ANSI
-color is enabled automatically in compatible terminals and can be controlled with
-`--color`, `--no-color`, or the standard `NO_COLOR` environment variable.
+The CLI renders a generated front and the universal card back side by side using
+ANSI terminal color.
 
 ## Try it
 
@@ -54,6 +53,9 @@ normally supplied by GCC or Clang).
 cargo test --workspace
 cargo run -- card generate --seed 01
 cargo run -- card gallery
+cargo run -- card command-gallery
+cargo run -- card charge-gallery
+cargo run -- card promo-gallery
 ```
 
 `card generate` always reproduces the same Card Type for the same generator version
@@ -61,6 +63,15 @@ and seed. `card gallery` intentionally chooses a new preview seed each run and
 prints that seed; use `cargo run -- card gallery --seed <printed-seed>` to reproduce
 the gallery exactly. This preview convenience does not affect generator
 determinism.
+
+`card command-gallery` prints all ten fixed Set 1 Command Card drafts, while
+`card charge-gallery` prints the six fixed typed Charge Card drafts. Their names,
+effects, and artwork do not vary by seed. These remain game-design material rather
+than canonical protocol objects.
+
+`card promo-gallery` prints the fixed, hand-authored launch Promo Card drafts.
+Promo 01 is `NETDOGE`, with a proposed hard supply of 1,000 copies. Promo previews
+are not procedural and are not activated protocol cards.
 
 For all CLI options:
 
@@ -73,7 +84,9 @@ cargo run -- card gallery --help
 
 - A domain-separated SHA-256 hash stream with unbiased integer selection.
 - Versioned deterministic generation of names, classes, rarity, supply, gameplay
-  stats, attacks, and ASCII artwork.
+  stats, varied attack/ability layouts, and ASCII artwork.
+- Exactly three gameplay rarity tiers: Common (`★`), Rare (`★★`), and Super Rare
+  (`★★★`).
 - Six computer-themed classes: Robot, Glitch, Daemon, Virus, Bug, and neutral Null.
 - Canonical binary serialization and cryptographic Card Type hashes.
 - A fixed-width terminal renderer with front, back, color, and experimental finish
@@ -106,8 +119,8 @@ docs/                   architecture and format notes
 ```
 
 Read [the architecture contract](docs/architecture.md), [Set and issuance notes](docs/sets-and-issuance.md),
-and [the `.bca` artwork format](docs/bca-format.md) for more detail. Contributor and
-automation rules live in [AGENTS.md](AGENTS.md). Release history is recorded in
-[CHANGELOG.md](CHANGELOG.md).
+[the draft game rules](docs/game-rules.md), and [the `.bca` artwork format](docs/bca-format.md)
+for more detail. Contributor and automation rules live in [AGENTS.md](AGENTS.md).
+Release history is recorded in [CHANGELOG.md](CHANGELOG.md).
 
 BitCards is licensed under the [MIT License](LICENSE).

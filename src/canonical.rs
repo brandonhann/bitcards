@@ -1,11 +1,19 @@
-use crate::{model::CardType, sha256::Sha256};
+use crate::{
+    model::{CardAction, CardType},
+    sha256::Sha256,
+};
 
-const DOMAIN: &[u8] = b"BITCARDS:CARDTYPE:V1";
+const DOMAIN_V1: &[u8] = b"BITCARDS:CARDTYPE:V1";
+const DOMAIN_V2: &[u8] = b"BITCARDS:CARDTYPE:V2";
 
 #[must_use]
 pub fn serialize(card: &CardType) -> Vec<u8> {
     let mut out = Vec::new();
-    out.extend_from_slice(DOMAIN);
+    out.extend_from_slice(match card.generator_version {
+        1 => DOMAIN_V1,
+        2 => DOMAIN_V2,
+        version => panic!("unsupported canonical Card Type version {version}"),
+    });
     u32_value(&mut out, card.generator_version);
     bytes(&mut out, &card.set_seed);
     bytes(&mut out, &card.card_type_seed);
@@ -17,13 +25,44 @@ pub fn serialize(card: &CardType) -> Vec<u8> {
     out.push(card.deploy_cost);
     u32_value(
         &mut out,
-        card.attacks.len().try_into().expect("too many attacks"),
+        card.actions.len().try_into().expect("too many actions"),
     );
-    for attack in &card.attacks {
-        text(&mut out, &attack.name);
-        out.extend_from_slice(&attack.damage.to_be_bytes());
-        out.push(attack.cost);
-        text(&mut out, &attack.effect);
+    for action in &card.actions {
+        if card.generator_version == 1 {
+            let CardAction::Attack {
+                name,
+                damage,
+                cost,
+                effect,
+            } = action
+            else {
+                panic!("generator v1 cannot encode abilities");
+            };
+            text(&mut out, name);
+            out.extend_from_slice(&damage.to_be_bytes());
+            out.push(*cost);
+            text(&mut out, effect);
+            continue;
+        }
+        match action {
+            CardAction::Attack {
+                name,
+                damage,
+                cost,
+                effect,
+            } => {
+                out.push(1);
+                text(&mut out, name);
+                out.extend_from_slice(&damage.to_be_bytes());
+                out.push(*cost);
+                text(&mut out, effect);
+            }
+            CardAction::Ability { name, effect } => {
+                out.push(2);
+                text(&mut out, name);
+                text(&mut out, effect);
+            }
+        }
     }
     u32_value(
         &mut out,
@@ -69,7 +108,7 @@ mod tests {
             maximum_supply: 9,
             hit_points: 80,
             deploy_cost: 2,
-            attacks: vec![Attack {
+            actions: vec![CardAction::Attack {
                 name: "Splat".into(),
                 damage: 20,
                 cost: 1,
@@ -94,7 +133,7 @@ mod tests {
     fn encoding_has_fixed_vector() {
         assert_eq!(
             hash_hex(&hash(&sample())),
-            "d134633be73d26851fa83d8e0525b5e1d149f82a00097da14f2bfdd2d44dffee"
+            "f5b1c74f59ad227fa9e01f70381dc480c35aa64ba9aecc00c9dc3bf108428a5d"
         );
     }
 }

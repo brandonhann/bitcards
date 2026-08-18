@@ -1,10 +1,313 @@
-use crate::model::{CardClass, CardType};
+use crate::model::{CardAction, CardClass, CardType};
+use crate::support_preview::{SupportKind, SupportPreview};
 /// Display dimensions are deliberately separate from canonical Card Type data.
 pub const INNER_WIDTH: usize = 32;
 pub const ART_HEIGHT: usize = 7;
+pub const CARD_HEIGHT: usize = 24;
 pub const MAX_DISPLAY_SET_ID: u32 = 99;
 pub const MAX_DISPLAY_SERIAL: u32 = 999_999;
 pub const MAX_DISPLAY_CATALOG_SIZE: u16 = 999;
+
+/// Display-only copy finish for fixed support cards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupportFinish {
+    Standard,
+    Rare,
+    SuperRare,
+}
+
+impl SupportFinish {
+    const fn stars(self) -> &'static str {
+        match self {
+            Self::Standard => "★",
+            Self::Rare => "★★",
+            Self::SuperRare => "★★★",
+        }
+    }
+}
+
+#[must_use]
+pub fn render_support_preview(card: &SupportPreview, colored: bool) -> String {
+    render_support_preview_with_identity(card, colored, 1, 1, 1)
+}
+
+#[must_use]
+pub fn render_support_preview_with_identity(
+    card: &SupportPreview,
+    colored: bool,
+    catalog_number: u16,
+    set_id: u32,
+    serial: u32,
+) -> String {
+    render_support_preview_with_identity_and_finish(
+        card,
+        colored,
+        catalog_number,
+        set_id,
+        serial,
+        SupportFinish::Standard,
+    )
+}
+
+#[must_use]
+pub fn render_support_preview_with_identity_and_finish(
+    card: &SupportPreview,
+    colored: bool,
+    catalog_number: u16,
+    set_id: u32,
+    serial: u32,
+    finish: SupportFinish,
+) -> String {
+    assert!((1..=MAX_DISPLAY_CATALOG_SIZE).contains(&catalog_number));
+    assert!((1..=MAX_DISPLAY_SET_ID).contains(&set_id));
+    assert!((1..=MAX_DISPLAY_SERIAL).contains(&serial));
+    let identity = footer(
+        &format!("{catalog_number:03} {}", finish.stars()),
+        &format!("SET {set_id:02}"),
+        &format!("#{serial:06}"),
+    );
+
+    if card.kind.is_charge() {
+        return render_charge_preview(card, colored, &identity, finish);
+    }
+
+    let mut rows = Vec::with_capacity(22);
+    rows.push(columns(card.name, "COMMAND"));
+    rows.push("─".repeat(INNER_WIDTH));
+    rows.push(String::new());
+    let artwork = command_artwork(&card.artwork, finish);
+    rows.extend(center_artwork(&artwork));
+    rows.push(String::new());
+    rows.push("─".repeat(INNER_WIDTH));
+    rows.push("EFFECT".into());
+    rows.extend(wrap(card.effect));
+    rows.resize(21, String::new());
+    rows.push(identity);
+
+    render_support_rows(card.kind, colored, rows, false, finish)
+}
+
+fn render_charge_preview(
+    card: &SupportPreview,
+    colored: bool,
+    identity: &str,
+    finish: SupportFinish,
+) -> String {
+    let class = card.kind.charge_class().expect("Charge card has a class");
+    let mut rows = Vec::with_capacity(22);
+    rows.push(columns(card.name, class.symbol()));
+    rows.push("─".repeat(INNER_WIDTH));
+    let padding = 19usize.saturating_sub(card.artwork.len());
+    rows.extend((0..padding / 2).map(|_| String::new()));
+    rows.extend(center_artwork(&card.artwork));
+    rows.extend((0..padding.div_ceil(2)).map(|_| String::new()));
+    rows.push(identity.into());
+    render_support_rows(card.kind, colored, rows, true, finish)
+}
+
+fn command_artwork(artwork: &[String], finish: SupportFinish) -> Vec<String> {
+    if finish != SupportFinish::SuperRare {
+        return artwork.to_vec();
+    }
+    artwork
+        .iter()
+        .map(|row| {
+            row.chars()
+                .map(|character| match character {
+                    '┌' => '╔',
+                    '┐' => '╗',
+                    '└' => '╚',
+                    '┘' => '╝',
+                    '─' => '═',
+                    '│' => '║',
+                    '>' => '#',
+                    _ => character,
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn render_support_rows(
+    kind: SupportKind,
+    colored: bool,
+    rows: Vec<String>,
+    full_art: bool,
+    finish: SupportFinish,
+) -> String {
+    let color = support_border_color();
+    let mut lines = Vec::with_capacity(CARD_HEIGHT);
+    lines.push(format!("╔{}╗", "═".repeat(INNER_WIDTH)));
+    for (row_index, row) in rows.into_iter().take(22).enumerate() {
+        if row == "─".repeat(INNER_WIDTH) {
+            if colored {
+                lines.push(format!(
+                    "\x1b[48;5;16m{color}╟{}╢\x1b[0m",
+                    "─".repeat(INNER_WIDTH)
+                ));
+            } else {
+                lines.push(format!("╟{}╢", "─".repeat(INNER_WIDTH)));
+            }
+            continue;
+        }
+        let row = fixed_width(&row);
+        if colored {
+            let content_style = if full_art && (2..=20).contains(&row_index) {
+                charge_art_style(kind, finish, row_index)
+            } else if !full_art && (2..=10).contains(&row_index) {
+                command_art_style(finish, row_index)
+            } else if !full_art {
+                command_panel_style(kind, finish)
+            } else if full_art {
+                charge_panel_style(kind, finish)
+            } else {
+                support_panel_style(kind)
+            };
+            lines.push(format!(
+                "\x1b[48;5;16m{color}║\x1b[0m{content_style}{row}\x1b[0m\x1b[48;5;16m{color}║\x1b[0m"
+            ));
+        } else {
+            lines.push(format!("║{row}║"));
+        }
+    }
+    lines.push(format!("╚{}╝", "═".repeat(INNER_WIDTH)));
+    if colored {
+        let top = format!("\x1b[48;5;16m{color}{}\x1b[0m", lines[0]);
+        let bottom = format!("\x1b[48;5;16m{color}{}\x1b[0m", lines[23]);
+        lines[0] = top;
+        lines[23] = bottom;
+    }
+    lines.join("\n")
+}
+
+fn charge_art_style(kind: SupportKind, finish: SupportFinish, row: usize) -> &'static str {
+    let class = kind.charge_class().expect("full art is Charge-only");
+    match finish {
+        SupportFinish::Standard => support_art_style(kind),
+        SupportFinish::Rare => match (class, row % 2) {
+            (CardClass::Robot, 0) => "\x1b[48;5;17m\x1b[38;5;117m",
+            (CardClass::Robot, _) => "\x1b[48;5;18m\x1b[38;5;117m",
+            (CardClass::Glitch, 0) => "\x1b[48;5;53m\x1b[38;5;213m",
+            (CardClass::Glitch, _) => "\x1b[48;5;54m\x1b[38;5;213m",
+            (CardClass::Daemon, 0) => "\x1b[48;5;52m\x1b[38;5;203m",
+            (CardClass::Daemon, _) => "\x1b[48;5;88m\x1b[38;5;203m",
+            (CardClass::Virus, 0) => "\x1b[48;5;22m\x1b[38;5;120m",
+            (CardClass::Virus, _) => "\x1b[48;5;28m\x1b[38;5;120m",
+            (CardClass::Bug, 0) => "\x1b[48;5;58m\x1b[38;5;222m",
+            (CardClass::Bug, _) => "\x1b[48;5;94m\x1b[38;5;222m",
+            (CardClass::Null, 0) => "\x1b[48;5;232m\x1b[38;5;255m",
+            (CardClass::Null, _) => "\x1b[48;5;236m\x1b[38;5;255m",
+        },
+        SupportFinish::SuperRare => match class {
+            CardClass::Robot => "\x1b[48;5;45m\x1b[38;5;16m",
+            CardClass::Glitch => "\x1b[48;5;135m\x1b[38;5;16m",
+            CardClass::Daemon => "\x1b[48;5;196m\x1b[38;5;16m",
+            CardClass::Virus => "\x1b[48;5;46m\x1b[38;5;16m",
+            CardClass::Bug => "\x1b[48;5;214m\x1b[38;5;16m",
+            CardClass::Null => "\x1b[48;5;255m\x1b[38;5;16m",
+        },
+    }
+}
+
+fn charge_panel_style(kind: SupportKind, finish: SupportFinish) -> &'static str {
+    match finish {
+        SupportFinish::Standard => support_panel_style(kind),
+        SupportFinish::Rare => charge_art_style(kind, finish, 2),
+        SupportFinish::SuperRare => charge_art_style(kind, finish, 2),
+    }
+}
+
+fn command_art_style(finish: SupportFinish, row: usize) -> &'static str {
+    match finish {
+        SupportFinish::Standard => "\x1b[48;5;16m\x1b[97m",
+        SupportFinish::Rare if row % 2 == 0 => "\x1b[48;5;234m\x1b[38;5;255m",
+        SupportFinish::Rare => "\x1b[48;5;236m\x1b[38;5;250m",
+        SupportFinish::SuperRare if row % 2 == 0 => "\x1b[48;5;250m\x1b[38;5;16m",
+        SupportFinish::SuperRare => "\x1b[48;5;255m\x1b[38;5;16m",
+    }
+}
+
+fn command_panel_style(kind: SupportKind, finish: SupportFinish) -> &'static str {
+    match finish {
+        SupportFinish::Standard => support_panel_style(kind),
+        SupportFinish::Rare => "\x1b[48;5;234m\x1b[38;5;255m",
+        SupportFinish::SuperRare => "\x1b[48;5;250m\x1b[38;5;16m",
+    }
+}
+
+fn support_art_style(kind: SupportKind) -> &'static str {
+    match kind.charge_class().expect("full art is Charge-only") {
+        CardClass::Robot => "\x1b[48;5;17m\x1b[96m",
+        CardClass::Glitch => "\x1b[48;5;53m\x1b[95m",
+        CardClass::Daemon => "\x1b[48;5;52m\x1b[91m",
+        CardClass::Virus => "\x1b[48;5;22m\x1b[92m",
+        CardClass::Bug => "\x1b[48;5;58m\x1b[38;5;214m",
+        CardClass::Null => "\x1b[48;5;16m\x1b[38;5;255m",
+    }
+}
+
+fn center_artwork(artwork: &[String]) -> Vec<String> {
+    let rows: Vec<Vec<char>> = artwork.iter().map(|row| row.chars().collect()).collect();
+    let left = rows
+        .iter()
+        .flat_map(|row| {
+            row.iter()
+                .enumerate()
+                .filter(|(_, character)| **character != ' ')
+                .map(|(column, _)| column)
+        })
+        .min()
+        .unwrap_or(0);
+    let right = rows
+        .iter()
+        .flat_map(|row| {
+            row.iter()
+                .enumerate()
+                .filter(|(_, character)| **character != ' ')
+                .map(|(column, _)| column)
+        })
+        .max()
+        .unwrap_or(left);
+    let width = right.saturating_sub(left) + 1;
+    let padding = INNER_WIDTH.saturating_sub(width) / 2;
+    rows.into_iter()
+        .map(|row| {
+            let mut centered = " ".repeat(padding);
+            centered.extend(row.get(left..=right).unwrap_or(&[]));
+            centered
+        })
+        .collect()
+}
+
+fn support_panel_style(kind: SupportKind) -> &'static str {
+    if let Some(class) = kind.charge_class() {
+        return match class {
+            CardClass::Robot => "\x1b[48;5;17m\x1b[96m",
+            CardClass::Glitch => "\x1b[48;5;53m\x1b[95m",
+            CardClass::Daemon => "\x1b[48;5;52m\x1b[91m",
+            CardClass::Virus => "\x1b[48;5;22m\x1b[92m",
+            CardClass::Bug => "\x1b[48;5;58m\x1b[38;5;208m",
+            CardClass::Null => "\x1b[48;5;16m\x1b[97m",
+        };
+    }
+    match kind {
+        SupportKind::QuickPatch
+        | SupportKind::Purge
+        | SupportKind::Download
+        | SupportKind::IndexSearch
+        | SupportKind::HotSwap
+        | SupportKind::ForceRoute
+        | SupportKind::Firewall
+        | SupportKind::SafeMode
+        | SupportKind::RebootCharge
+        | SupportKind::BurstCharge => "\x1b[48;5;236m\x1b[38;5;252m",
+        _ => unreachable!("Charge kinds returned above"),
+    }
+}
+
+const fn support_border_color() -> &'static str {
+    "\x1b[97m"
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CatalogPosition {
@@ -92,6 +395,195 @@ pub fn render_catalog_preview(
     render_identity_with_preview(card, set_id, serial, catalog, true, Some(preview))
 }
 
+/// Renders a fixed promotional copy with the Promo-only `✦` footer mark.
+#[must_use]
+pub fn render_promo_preview(
+    card: &CardType,
+    set_id: u32,
+    serial: u32,
+    promo_number: u16,
+) -> String {
+    assert!((1..=10).contains(&promo_number));
+    assert!((1..=MAX_DISPLAY_SET_ID).contains(&set_id));
+    assert!((1..=MAX_DISPLAY_SERIAL).contains(&serial));
+    let identity = footer(
+        &format!("{promo_number:03} ✦"),
+        &format!("SET {set_id:02}"),
+        &format!("#{serial:06}"),
+    );
+    let centered_artwork: Vec<Vec<char>> = center_artwork(&card.artwork)
+        .into_iter()
+        .map(|row| fixed_width(&row).chars().collect())
+        .collect();
+    let mut artwork = vec![vec![' '; INNER_WIDTH]; 2];
+    artwork.extend(centered_artwork);
+    artwork.truncate(21);
+    artwork.resize(21, vec![' '; INNER_WIDTH]);
+    let doge_source = artwork.clone();
+    let mut eye_cells = vec![vec![false; INNER_WIDTH]; 21];
+    mark_all_promo_patterns(&doge_source[7], &mut eye_cells[7], &['░', '░', '░']);
+    let mut foreground = vec![vec![false; INNER_WIDTH]; 21];
+    let mut coverage = vec![vec![false; INNER_WIDTH]; 21];
+    overlay_promo_text(
+        &mut artwork[0],
+        &mut foreground[0],
+        &mut coverage[0],
+        &columns(&card.name, &format!("HP: {}", card.hit_points)),
+    );
+    overlay_promo_text(
+        &mut artwork[1],
+        &mut foreground[1],
+        &mut coverage[1],
+        &columns(
+            &format!(
+                "{} {}",
+                card.class.symbol(),
+                card.class.name().to_uppercase()
+            ),
+            "",
+        ),
+    );
+    for (slot, action) in card.actions.iter().take(2).enumerate() {
+        let heading_row = 11 + slot * 4;
+        let (heading, detail) = match action {
+            CardAction::Attack {
+                name,
+                damage,
+                cost,
+                effect,
+            } => (
+                columns(name, &damage.to_string()),
+                format!("{} {cost} {effect}", attack_charge_symbol(card.class)),
+            ),
+            CardAction::Ability { name, effect } => (name.clone(), effect.clone()),
+        };
+        overlay_promo_text(
+            &mut artwork[heading_row],
+            &mut foreground[heading_row],
+            &mut coverage[heading_row],
+            &heading,
+        );
+        for (offset, detail_row) in wrap(&detail).into_iter().take(2).enumerate() {
+            overlay_promo_text(
+                &mut artwork[heading_row + 1 + offset],
+                &mut foreground[heading_row + 1 + offset],
+                &mut coverage[heading_row + 1 + offset],
+                &detail_row,
+            );
+        }
+    }
+
+    let border = "\x1b[48;5;16m\x1b[97m";
+    let mut lines = Vec::with_capacity(CARD_HEIGHT);
+    lines.push(format!("{border}╔{}╗\x1b[0m", "═".repeat(INNER_WIDTH)));
+    for (row_index, ((((row, mask), covered), source), eyes)) in artwork
+        .into_iter()
+        .zip(foreground)
+        .zip(coverage)
+        .zip(doge_source)
+        .zip(eye_cells)
+        .enumerate()
+    {
+        let mut content = String::new();
+        for (column, ((((character, foreground), covered), source), eye)) in row
+            .into_iter()
+            .zip(mask)
+            .zip(covered)
+            .zip(source)
+            .zip(eyes)
+            .enumerate()
+        {
+            content.push_str(if covered {
+                promo_overlay_style(source, foreground)
+            } else if foreground {
+                unreachable!("foreground text is always covered")
+            } else if eye {
+                "\x1b[48;5;16m\x1b[1;97m"
+            } else if source != ' ' {
+                "\x1b[48;5;16m\x1b[38;5;180m"
+            } else {
+                "\x1b[48;5;16m\x1b[38;5;240m"
+            });
+            let visible_character = if !foreground
+                && !covered
+                && source == ' '
+                && character == ' '
+                && (row_index * 3 + column) % 7 == 0
+            {
+                '·'
+            } else {
+                character
+            };
+            content.push(visible_character);
+            content.push_str("\x1b[0m");
+        }
+        lines.push(format!("{border}║\x1b[0m{content}{border}║\x1b[0m"));
+    }
+    let footer_content = promo_star_texture(&identity, 22);
+    let mut colored_footer = String::new();
+    for character in footer_content.chars() {
+        colored_footer.push_str(if character == '·' {
+            "\x1b[48;5;16m\x1b[38;5;240m"
+        } else {
+            "\x1b[48;5;16m\x1b[1;97m"
+        });
+        colored_footer.push(character);
+        colored_footer.push_str("\x1b[0m");
+    }
+    lines.push(format!("{border}║\x1b[0m{colored_footer}{border}║\x1b[0m"));
+    lines.push(format!("{border}╚{}╝\x1b[0m", "═".repeat(INNER_WIDTH)));
+    lines.join("\n")
+}
+
+fn overlay_promo_text(
+    row: &mut [char],
+    foreground: &mut [bool],
+    coverage: &mut [bool],
+    text: &str,
+) {
+    let characters: Vec<_> = text.chars().take(INNER_WIDTH).collect();
+    for (index, character) in characters.iter().copied().enumerate() {
+        if character != ' ' {
+            row[index] = character;
+            foreground[index] = true;
+            coverage[index] = true;
+        }
+    }
+}
+
+fn mark_all_promo_patterns(row: &[char], mask: &mut [bool], pattern: &[char]) {
+    for start in 0..=row.len().saturating_sub(pattern.len()) {
+        if &row[start..start + pattern.len()] == pattern {
+            mask[start..start + pattern.len()].fill(true);
+        }
+    }
+}
+
+fn promo_overlay_style(_source: char, foreground: bool) -> &'static str {
+    assert!(foreground, "Promo overlay coverage must contain text");
+    "\x1b[48;5;16m\x1b[1;97m"
+}
+
+fn promo_star_texture(value: &str, row: usize) -> String {
+    let characters: Vec<_> = value.chars().collect();
+    characters
+        .iter()
+        .enumerate()
+        .map(|(column, character)| {
+            let word_separator = *character == ' '
+                && column > 0
+                && column + 1 < characters.len()
+                && characters[column - 1] != ' '
+                && characters[column + 1] != ' ';
+            if *character == ' ' && !word_separator && (row * 3 + column) % 7 == 0 {
+                '·'
+            } else {
+                *character
+            }
+        })
+        .collect()
+}
+
 fn render_identity(
     card: &CardType,
     set_id: Option<u32>,
@@ -154,26 +646,31 @@ fn render_identity_with_preview(
     }
     add_art_row(&mut lines, "", card.class, colored, preview);
     separator(&mut lines, card.class, colored, preview);
-    for (index, attack) in card.attacks.iter().take(2).enumerate() {
+    let mut action_rows = Vec::with_capacity(7);
+    for (index, action) in card.actions.iter().take(2).enumerate() {
         if index != 0 {
-            add_shaded(&mut lines, "", card.class, colored, preview);
+            action_rows.push(String::new());
         }
-        add_shaded(
-            &mut lines,
-            columns(&attack.name, &attack.damage.to_string()),
-            card.class,
-            colored,
-            preview,
-        );
-        let wrapped = wrap(&format!("CHG {} • {}", attack.cost, attack.effect));
-        add_shaded(&mut lines, &wrapped[0], card.class, colored, preview);
-        add_shaded(
-            &mut lines,
-            wrapped.get(1).map_or("", String::as_str),
-            card.class,
-            colored,
-            preview,
-        );
+        let (heading, detail) = match action {
+            CardAction::Attack {
+                name,
+                damage,
+                cost,
+                effect,
+            } => (
+                columns(name, &damage.to_string()),
+                format!("{} {cost} {effect}", attack_charge_symbol(card.class)),
+            ),
+            CardAction::Ability { name, effect } => (columns(name, "ABILITY"), effect.clone()),
+        };
+        action_rows.push(heading);
+        let wrapped = wrap(&detail);
+        action_rows.push(wrapped.first().cloned().unwrap_or_default());
+        action_rows.push(wrapped.get(1).cloned().unwrap_or_default());
+    }
+    action_rows.resize(7, String::new());
+    for row in action_rows.into_iter().take(7) {
+        add_shaded(&mut lines, row, card.class, colored, preview);
     }
     let serial = serial.map(|value| {
         assert!(
@@ -196,13 +693,13 @@ fn render_identity_with_preview(
             &format!(
                 "{:03} {}",
                 catalog.number,
-                "★".repeat(
-                    preview.map_or(card.rarity.stars() as usize, |preview| match preview {
+                "★".repeat(preview.map_or(card.rarity.stars() as usize, |preview| {
+                    match preview {
                         RarityPreview::Common => 1,
                         RarityPreview::Rare | RarityPreview::ReverseHolo => 2,
                         RarityPreview::Gold | RarityPreview::SuperRare => 3,
-                    })
-                ),
+                    }
+                })),
             ),
             set.as_deref().unwrap_or(""),
             serial.as_deref().unwrap_or(""),
@@ -299,14 +796,14 @@ fn holo_background(class: CardClass, row: usize, column: usize) -> &'static str 
             "\x1b[48;2;0;40;52m",
         ][band],
         CardClass::Glitch => [
-            "\x1b[48;2;36;0;8m",
-            "\x1b[48;2;48;0;12m",
-            "\x1b[48;2;60;0;16m",
-        ][band],
-        CardClass::Daemon => [
             "\x1b[48;2;28;8;36m",
             "\x1b[48;2;38;10;48m",
             "\x1b[48;2;48;12;60m",
+        ][band],
+        CardClass::Daemon => [
+            "\x1b[48;2;36;0;8m",
+            "\x1b[48;2;48;0;12m",
+            "\x1b[48;2;60;0;16m",
         ][band],
         CardClass::Virus => [
             "\x1b[48;2;0;30;12m",
@@ -618,8 +1115,8 @@ fn premium_text_style(preview: Option<RarityPreview>) -> &'static str {
 fn class_background(class: CardClass, _row: usize, _column: usize) -> &'static str {
     match class {
         CardClass::Robot => "\x1b[48;5;17m",
-        CardClass::Glitch => "\x1b[48;5;52m",
-        CardClass::Daemon => "\x1b[48;5;53m",
+        CardClass::Glitch => "\x1b[48;5;53m",
+        CardClass::Daemon => "\x1b[48;5;52m",
         CardClass::Virus => "\x1b[48;5;22m",
         CardClass::Bug => "\x1b[48;5;58m",
         CardClass::Null => "",
@@ -635,8 +1132,8 @@ fn reverse_holo_background(class: CardClass, row: usize, column: usize) -> &'sta
     };
     match class {
         CardClass::Robot => ["\x1b[48;5;45m", "\x1b[48;5;51m"][band],
-        CardClass::Glitch => ["\x1b[48;5;196m", "\x1b[48;5;202m", "\x1b[48;5;203m"][band],
-        CardClass::Daemon => ["\x1b[48;5;129m", "\x1b[48;5;165m"][band],
+        CardClass::Glitch => ["\x1b[48;5;129m", "\x1b[48;5;165m", "\x1b[48;5;201m"][band],
+        CardClass::Daemon => ["\x1b[48;5;196m", "\x1b[48;5;203m"][band],
         CardClass::Virus => ["\x1b[48;5;40m", "\x1b[48;5;82m"][band],
         CardClass::Bug => ["\x1b[48;5;208m", "\x1b[48;5;214m"][band],
         CardClass::Null => ["\x1b[48;5;250m", "\x1b[48;5;255m"][band],
@@ -646,8 +1143,8 @@ fn reverse_holo_background(class: CardClass, row: usize, column: usize) -> &'sta
 fn reverse_holo_text_color(class: CardClass) -> &'static str {
     match class {
         CardClass::Robot => "\x1b[38;2;0;30;35m",
-        CardClass::Glitch => "\x1b[38;2;45;0;0m",
-        CardClass::Daemon => "\x1b[38;2;30;0;40m",
+        CardClass::Glitch => "\x1b[38;2;30;0;40m",
+        CardClass::Daemon => "\x1b[38;2;45;0;0m",
         CardClass::Virus => "\x1b[38;2;0;35;10m",
         CardClass::Bug => "\x1b[38;2;45;28;0m",
         CardClass::Null => "\x1b[38;2;25;25;25m",
@@ -656,8 +1153,13 @@ fn reverse_holo_text_color(class: CardClass) -> &'static str {
 fn panel_color(class: CardClass, column: usize) -> &'static str {
     match class {
         CardClass::Robot => "\x1b[96m",
-        CardClass::Glitch => ["\x1b[91m", "\x1b[91m", "\x1b[93m", "\x1b[95m"][column % 4],
-        CardClass::Daemon => "\x1b[95m",
+        CardClass::Glitch => [
+            "\x1b[38;5;129m",
+            "\x1b[38;5;165m",
+            "\x1b[38;5;201m",
+            "\x1b[95m",
+        ][column % 4],
+        CardClass::Daemon => "\x1b[91m",
         CardClass::Virus => "\x1b[92m",
         CardClass::Bug => "\x1b[38;5;208m",
         CardClass::Null => "\x1b[90m",
@@ -666,8 +1168,8 @@ fn panel_color(class: CardClass, column: usize) -> &'static str {
 fn primary_color(class: CardClass) -> &'static str {
     match class {
         CardClass::Robot => "\x1b[96m",
-        CardClass::Glitch => "\x1b[91m",
-        CardClass::Daemon => "\x1b[95m",
+        CardClass::Glitch => "\x1b[95m",
+        CardClass::Daemon => "\x1b[91m",
         CardClass::Virus => "\x1b[92m",
         CardClass::Bug => "\x1b[38;5;208m",
         CardClass::Null => "\x1b[97m",
@@ -756,6 +1258,14 @@ fn columns(left: &str, right: &str) -> String {
         )
     }
 }
+
+const fn attack_charge_symbol(class: CardClass) -> &'static str {
+    match class {
+        CardClass::Null => "◇",
+        _ => class.symbol(),
+    }
+}
+
 fn footer(left: &str, middle: &str, right: &str) -> String {
     let mut row = vec![' '; INNER_WIDTH];
     place(&mut row, 0, left);
@@ -789,7 +1299,7 @@ fn wrap(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::generator::CardGenerator;
+    use crate::generator::{CURRENT_GENERATOR_VERSION, CardGenerator};
     #[test]
     fn rendering_is_fixed_size_utf8() {
         let card = CardGenerator::default()
@@ -805,6 +1315,212 @@ mod tests {
             lines[lines.len() - 1],
             format!("╚{}╝", "═".repeat(INNER_WIDTH))
         );
+    }
+
+    #[test]
+    fn every_action_layout_keeps_the_card_fixed_height() {
+        let generator = CardGenerator::default();
+        let mut seen_lengths = std::collections::HashSet::new();
+        for seed in 0..=255u8 {
+            let card = generator
+                .generate(CURRENT_GENERATOR_VERSION, &[0; 32], &[seed])
+                .unwrap();
+            seen_lengths.insert(card.actions.len());
+            let output = render(&card);
+            assert_eq!(output.lines().count(), 24);
+            assert!(output.lines().all(|line| line.chars().count() == 34));
+        }
+        assert_eq!(seen_lengths, std::collections::HashSet::from([1, 2]));
+    }
+
+    #[test]
+    fn generated_action_text_never_overflows_its_reserved_rows() {
+        let generator = CardGenerator::default();
+        for seed in 0..=4095u16 {
+            let card = generator
+                .generate(CURRENT_GENERATOR_VERSION, &[0; 32], &seed.to_be_bytes())
+                .unwrap();
+            for action in &card.actions {
+                let (heading, detail) = match action {
+                    CardAction::Attack {
+                        name,
+                        damage,
+                        cost,
+                        effect,
+                    } => (
+                        columns(name, &damage.to_string()),
+                        format!("{} {cost} {effect}", attack_charge_symbol(card.class)),
+                    ),
+                    CardAction::Ability { name, effect } => {
+                        (columns(name, "ABILITY"), effect.clone())
+                    }
+                };
+                assert_eq!(heading.chars().count(), INNER_WIDTH);
+                assert!(
+                    wrap(&detail).len() <= 2,
+                    "action text overflowed for seed {seed}: {detail}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn attack_costs_use_class_symbols_and_explicit_numbers() {
+        for class in CardClass::ALL {
+            let symbol = attack_charge_symbol(class);
+            let detail = format!("{symbol} {} Effect", 3);
+            assert!(detail.starts_with(symbol));
+            assert!(detail.contains(" 3 "));
+            assert!(!detail.contains("CHG"));
+            assert!(!detail.contains('•'));
+        }
+        assert_eq!(attack_charge_symbol(CardClass::Null), "◇");
+        assert_ne!(
+            attack_charge_symbol(CardClass::Null),
+            CardClass::Null.symbol()
+        );
+    }
+
+    #[test]
+    fn support_previews_match_the_standard_card_dimensions() {
+        for kind in SupportKind::COMMANDS
+            .into_iter()
+            .chain(SupportKind::CHARGES)
+        {
+            let card = crate::support_preview::generate(kind);
+            let output = render_support_preview(&card, false);
+            assert_eq!(output.lines().count(), 24);
+            assert!(output.lines().all(|line| line.chars().count() == 34));
+            assert_eq!(
+                output.lines().filter(|line| line.starts_with('╟')).count(),
+                if kind.is_charge() { 1 } else { 2 }
+            );
+            assert!(!output.contains("DRAFT PREVIEW"));
+            assert!(output.contains("SET 01"));
+            assert!(output.contains("#000001"));
+        }
+    }
+
+    #[test]
+    fn promo_footer_uses_its_own_mark_instead_of_rarity_stars() {
+        let card = crate::promo_preview::set_one_promos().remove(0);
+        let output = render_promo_preview(&card, 1, 1, 1);
+        let footer = output.lines().nth(22).unwrap();
+        assert!(footer.contains('✦'));
+        assert!(!footer.contains('★'));
+        assert_eq!(output.lines().count(), 24);
+    }
+
+    #[test]
+    fn command_finishes_are_visual_only_and_use_unique_terminal_styles() {
+        let card = crate::support_preview::generate(SupportKind::QuickPatch);
+        let standard = render_support_preview_with_identity_and_finish(
+            &card,
+            false,
+            1,
+            1,
+            1,
+            SupportFinish::Standard,
+        );
+        let rare = render_support_preview_with_identity_and_finish(
+            &card,
+            true,
+            1,
+            1,
+            1,
+            SupportFinish::Rare,
+        );
+        let super_rare_plain = render_support_preview_with_identity_and_finish(
+            &card,
+            false,
+            1,
+            1,
+            1,
+            SupportFinish::SuperRare,
+        );
+        let super_rare = render_support_preview_with_identity_and_finish(
+            &card,
+            true,
+            1,
+            1,
+            1,
+            SupportFinish::SuperRare,
+        );
+
+        assert!(standard.contains("001 ★ "));
+        assert!(rare.contains("001 ★★ "));
+        assert!(rare.contains("\x1b[48;5;234m\x1b[38;5;255m"));
+        assert!(super_rare_plain.contains("001 ★★★ "));
+        assert!(super_rare_plain.contains("╔═══════════════════════════╗"));
+        assert!(super_rare_plain.contains("# patch --active"));
+        assert!(super_rare.contains("\x1b[48;5;250m\x1b[38;5;16m"));
+        for output in [standard, super_rare_plain] {
+            assert_eq!(output.lines().count(), 24);
+            assert!(output.lines().all(|line| line.chars().count() == 34));
+        }
+    }
+
+    #[test]
+    fn all_standard_commands_share_one_gray_panel_palette() {
+        for kind in SupportKind::COMMANDS {
+            let card = crate::support_preview::generate(kind);
+            let output = render_support_preview_with_identity_and_finish(
+                &card,
+                true,
+                1,
+                1,
+                1,
+                SupportFinish::Standard,
+            );
+            assert!(output.contains("\x1b[48;5;236m\x1b[38;5;252m"));
+        }
+    }
+
+    #[test]
+    fn charge_finishes_keep_identity_and_use_pulse_and_overcharged_styles() {
+        let card = crate::support_preview::generate(SupportKind::RobotCharge);
+        let rare = render_support_preview_with_identity_and_finish(
+            &card,
+            true,
+            1,
+            1,
+            1,
+            SupportFinish::Rare,
+        );
+        let super_rare = render_support_preview_with_identity_and_finish(
+            &card,
+            true,
+            1,
+            1,
+            1,
+            SupportFinish::SuperRare,
+        );
+        let rare_plain = render_support_preview_with_identity_and_finish(
+            &card,
+            false,
+            1,
+            1,
+            1,
+            SupportFinish::Rare,
+        );
+        let super_rare_plain = render_support_preview_with_identity_and_finish(
+            &card,
+            false,
+            1,
+            1,
+            1,
+            SupportFinish::SuperRare,
+        );
+
+        assert!(rare.contains("\x1b[48;5;17m\x1b[38;5;117m"));
+        assert!(rare.contains("\x1b[48;5;18m\x1b[38;5;117m"));
+        assert!(super_rare.contains("\x1b[48;5;45m\x1b[38;5;16m"));
+        assert!(rare_plain.contains("001 ★★ "));
+        assert!(super_rare_plain.contains("001 ★★★ "));
+        for output in [rare_plain, super_rare_plain] {
+            assert_eq!(output.lines().count(), 24);
+            assert!(output.lines().all(|line| line.chars().count() == 34));
+        }
     }
 
     #[test]
@@ -1033,12 +1749,12 @@ mod tests {
         let glitch_reverse: Vec<_> = (0..6)
             .map(|column| reverse_holo_background(CardClass::Glitch, 0, column))
             .collect();
-        assert!([196, 202, 203].into_iter().all(|color| {
+        assert!([129, 165, 201].into_iter().all(|color| {
             glitch_reverse
                 .iter()
                 .any(|background| *background == format!("\x1b[48;5;{color}m"))
         }));
-        assert!(!glitch_reverse.contains(&"\x1b[48;5;201m"));
+        assert!(!glitch_reverse.contains(&"\x1b[48;5;196m"));
     }
 
     #[test]
@@ -1046,7 +1762,7 @@ mod tests {
         let mut lines = Vec::new();
         add_shaded(&mut lines, "T ", CardClass::Glitch, true, None);
         assert!(lines[0].contains(&format!(
-            "{}\x1b[91mT\x1b[0m{} ",
+            "{}\x1b[95mT\x1b[0m{} ",
             information_background(CardClass::Glitch, 0, 0, None),
             information_background(CardClass::Glitch, 0, 1, None),
         )));
@@ -1097,7 +1813,7 @@ mod tests {
             .unwrap();
         for (class, color) in [
             (CardClass::Robot, "\x1b[96m"),
-            (CardClass::Daemon, "\x1b[95m"),
+            (CardClass::Daemon, "\x1b[91m"),
             (CardClass::Virus, "\x1b[92m"),
             (CardClass::Bug, "\x1b[38;5;208m"),
             (CardClass::Null, "\x1b[97m"),
@@ -1109,7 +1825,7 @@ mod tests {
         }
         card.class = CardClass::Glitch;
         let output = render_with_identity_colored(&card, Some(1), Some(1));
-        assert!(output.contains("\x1b[48;5;52m"));
+        assert!(output.contains("\x1b[48;5;53m"));
         assert!(!output.contains("\x1b[48;5;88m"));
         let first_name_character = card.name.chars().next().unwrap();
         assert!(output.contains(&format!(

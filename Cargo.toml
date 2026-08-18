@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.85"
 license = "MIT"
 description = "Deterministic native ASCII trading cards"
+repository = "https://github.com/brandonhann/bitcards"
 
 [workspace]
 members = ["tools/art-lab"]

@@ -51,7 +51,7 @@ The current stream derivation and canonical format are documented in
   Types, rarity rules, and hard supply limits. Activated Sets must be immutable;
   after retirement no more copies from that Set may be minted.
 - A **Card Type** is the deterministic shared identity: name, class, rarity,
-  supply, stats, attacks, artwork, version, seeds, canonical bytes, and hash.
+  supply, stats, actions, artwork, version, seeds, canonical bytes, and hash.
 - A **Card Copy** is a future owned instance with a permanent serial within its
   Card Type. Serial 1 is the unique Origin copy without a special mint path.
 - The three-digit catalog number identifies a Card Type's position within its Set.
@@ -72,10 +72,53 @@ The six current computer-themed classes and symbols are:
 - `{}` Bug
 - `()` Null
 
+The draft game has three categories: BitCards battle, Charge Cards build a shared
+reusable resource pool, and one-use Command Cards provide support effects. The
+initial deck proposal is 40 cards with no more than three copies of one Card Type,
+a five-card opening hand, one Active BitCard, and up to three Benched BitCards.
+
+Players may install one Charge Card per turn, up to six. Installed Charge is shared
+by every friendly BitCard, attacks exhaust it, and it refreshes at the beginning of
+the owner's next turn. Charge Cards correspond to the six classes. The current
+proposal requires at least one matching Charge for a specialized BitCard's attack;
+remaining costs may use any Charge. Null attacks display `◇` and may be paid with
+any combination of non-Null Charge. The experimental `()` Null Charge Card does not
+currently pay attack costs. Players may play one Command per turn. Attacking ends
+the turn. The first player to knock out three opposing BitCards wins; inability to
+draw also loses.
+
 The prototype advantage loop is Robot → Virus → Daemon → Glitch → Bug → Robot.
-Advantage adds 10 damage. Null is neutral. The prototype shared resource is Charge:
-players gain one per turn and may store up to six. These rules remain configurable
-while Phase 1 is experimental.
+Advantage adds 10 damage and Null is neutral. These are draft game rules, not
+consensus constants. Keep blockchain ownership independent from match state.
+
+Each of the six Charge types has exactly one fixed full-art design: its two-character
+class symbol rendered at large scale with block glyphs. Charge artwork and names must
+not vary by seed. Charge cards have no effect panel and use the standard
+common-rarity footer with catalog number, Set ID, and copy serial. Treat the
+established symbol font as immutable; an intentional replacement requires an
+explicit new support-card design version rather than silently changing it.
+
+Charge copies may use three display-only finishes without changing their gameplay
+identity: Standard, a dark alternating-band Pulse Rare treatment, and a bright
+inverted Overcharged Super Rare treatment. They share the same catalog slot and
+deck limit. Their symbols retain the fixed artwork and their outer borders stay white.
+
+The Set 1 gameplay draft contains exactly ten fixed, hand-authored Command Card
+types: two each for repair, draw/search, switching, defense, and Charge control.
+Their names, rules text, and terminal artwork do not vary by seed. Command effects
+must remain conservative under the one-Command-per-turn rule and should not create
+repeatable denial or permanent free resources.
+
+Command copies may use three display-only finishes without changing their gameplay
+identity: Standard, a grayscale CRT Rare treatment, and a high-contrast monochrome
+double-frame root-terminal Super Rare treatment. Finish variants share the same
+catalog slot, rules, and deck limit. Their outer card borders remain white.
+
+The launch marketing draft allows up to ten fixed, hand-authored Promo Card Types,
+with a proposed hard supply of 1,000 copies each. They are playable but must not be
+stronger than ordinarily obtainable cards. Promo 01 is the neutral `NETDOGE` draft.
+Promo definitions never vary by seed; none are activated protocol objects yet.
+Promo cards use the exclusive `✦` footer mark and never display rarity stars.
 
 ## Code boundaries
 
@@ -84,7 +127,8 @@ while Phase 1 is experimental.
 - `src/generator.rs` and `src/creature.rs`: consensus-relevant generation.
 - `src/canonical.rs`: canonical Card Type encoding and hashing.
 - `src/renderer.rs`: terminal presentation only; keep it outside canonical hashes.
-- `src/generator_assets/v1/`: embedded, versioned generator assets.
+- `src/generator_assets/v1/`: locked version 1 names, palettes, and visual assets.
+- `src/generator_assets/v2/`: version 2 action tables.
 - `generator-assets/drafts/`: editable artwork drafts, not active consensus assets.
 - `tools/art-lab/`: non-consensus authoring and validation utilities.
 - `tests/determinism_vectors.rs`: locked end-to-end vectors.
@@ -107,10 +151,10 @@ Use the documented `.bca` format for draft art components. Validate drafts with
 the art lab before promoting them. Released versioned assets are immutable; add a
 new generator version for incompatible changes.
 
-ANSI color and finish previews are presentation features. They must degrade to a
-readable no-color card, respect `NO_COLOR`, and never affect canonical generation.
-Do not describe experimental Holo, Reverse Holo, Gold, Rainbow Holo, or rarity
-previews as finalized protocol objects.
+ANSI color and finish previews are presentation features and never affect canonical
+generation. The user-facing CLI renders cards in color; plain rendering may remain
+available internally for exact-width tests. Do not describe experimental Holo,
+Reverse Holo, Gold, Rainbow Holo, or rarity previews as finalized protocol objects.
 
 ## Required verification
 

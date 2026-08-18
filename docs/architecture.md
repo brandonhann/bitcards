@@ -3,12 +3,13 @@
 The `bitcards` library contains consensus-oriented models, generation, canonical
 encoding, and hashing. The binary is only a CLI adapter. Rendering is a separate
 projection which consumes a generated model and cannot alter it.
-Generator data is stored under `src/generator_assets/v1`: Rust constants hold
-small palettes and name tables, while larger ASCII templates are plain text
-embedded with `include_str!`. Generator assets are never loaded as mutable runtime
+Generator data is stored under versioned `src/generator_assets/` modules. Version
+1 holds palettes, names, and ASCII templates; version 2 adds action tables while
+reusing the locked version 1 visual assets. Larger templates are plain text embedded
+with `include_str!`. Generator assets are never loaded as mutable runtime
 configuration.
 
-## Version 1 seed derivation
+## Seed derivation
 
 The generator receives three explicit inputs: a positive 32-bit generator version,
 an arbitrary non-empty Set seed, and an arbitrary non-empty Card Type seed. Version
@@ -31,8 +32,8 @@ exists; that lifecycle is intentionally outside Phase 1.
 
 ## Canonical Card Type encoding
 
-The binary encoding begins with ASCII `BITCARDS:CARDTYPE:V1` and encodes fields in a
-fixed documented order. Unsigned integers are big-endian. Enum values are one byte.
+Each binary encoding begins with a versioned domain: `BITCARDS:CARDTYPE:V1` or
+`BITCARDS:CARDTYPE:V2`. Unsigned integers are big-endian. Enum values are one byte.
 Strings are UTF-8 prefixed by a four-byte length. Version 1 generation emits only
 protocol-fixed ASCII strings and ASCII artwork, avoiding Unicode normalization
 ambiguity; the Unicode card border and rarity stars are display-only. Lists use a
@@ -41,12 +42,23 @@ four-byte count followed by ordered elements. The order is:
 1. generator version, Set seed, Card Type seed
 2. name, class, rarity, maximum supply
 3. HP and deploy cost
-4. ordered attacks (name, damage, cost, effect)
+4. ordered actions
 5. ordered artwork rows
+
+Version 1 actions are always attacks encoded as name, damage, cost, and effect.
+Version 2 prefixes every action with a one-byte kind. Attack kind `1` is followed
+by name, damage, cost, and effect. Ability kind `2` is followed by name and effect.
+This explicit distinction avoids magic damage values and keeps abilities strongly
+typed.
 
 The hash is SHA-256 over exactly this encoding. Display-only serial numbers belong
 to future Card Copies and are not part of a Card Type. Discovery block height is
 also copy-specific and therefore excluded from Card Type generation and hashing.
+
+Card Types use exactly three protocol rarity values: Common, Rare, and Super Rare.
+Their default integer selection weights total 10,000, and each higher tier has a
+lower hard maximum supply. Holo, Reverse Holo, Gold, and Rainbow Holo are visual
+copy finishes under evaluation; they are not additional rarity values.
 
 The distinction between Blocks, Sets, Card Types, and Card Copies—and the current
 finite-issuance proposal—is documented in
@@ -60,8 +72,11 @@ beats Daemon, Daemon beats Glitch, Glitch beats Bug, and Bug beats Robot. An
 advantaged attack adds 10 damage. Null is neutral in both directions.
 
 Attacks spend universal Charge. The prototype grants 1 Charge per turn and caps
-stored Charge at 6. These integer constants are explicit and testable; no
-floating-point modifiers are used.
+stored Charge at 6. Abilities are passive and do not have damage or a Charge cost.
+Version 2 deterministically gives a Card Type one strong attack (20%), one ability
+plus one attack (35%), or two attacks (45%). The renderer reserves the same seven
+action rows for every layout. These integer constants are explicit and testable;
+no floating-point modifiers are used.
 
 ## Artwork diversity
 

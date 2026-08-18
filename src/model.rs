@@ -2,13 +2,13 @@
 #[repr(u8)]
 pub enum Rarity {
     Common = 1,
-    Uncommon,
     Rare,
-    Legendary,
-    Mythic,
+    SuperRare,
 }
 
 impl Rarity {
+    pub const ALL: [Self; 3] = [Self::Common, Self::Rare, Self::SuperRare];
+
     pub const fn stars(self) -> u8 {
         self as u8
     }
@@ -84,11 +84,31 @@ impl CardClass {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Attack {
-    pub name: String,
-    pub damage: u16,
-    pub cost: u8,
-    pub effect: String,
+pub enum CardAction {
+    Attack {
+        name: String,
+        damage: u16,
+        cost: u8,
+        effect: String,
+    },
+    Ability {
+        name: String,
+        effect: String,
+    },
+}
+
+impl CardAction {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Attack { name, .. } | Self::Ability { name, .. } => name,
+        }
+    }
+
+    pub fn effect(&self) -> &str {
+        match self {
+            Self::Attack { effect, .. } | Self::Ability { effect, .. } => effect,
+        }
+    }
 }
 
 pub const CHARGE_GAIN_PER_TURN: u8 = 1;
@@ -113,36 +133,30 @@ pub struct CardType {
     pub maximum_supply: u32,
     pub hit_points: u16,
     pub deploy_cost: u8,
-    pub attacks: Vec<Attack>,
+    pub actions: Vec<CardAction>,
     pub artwork: Vec<String>,
     pub hash: [u8; 32],
 }
 
-pub const VERSION_1_RARITY_RULES: [RarityRule; 5] = [
+/// Default rarity and supply policy used by the current generators.
+///
+/// The weights deliberately total 10,000 so their relative probabilities are
+/// easy to inspect without using floating-point arithmetic.
+pub const DEFAULT_RARITY_RULES: [RarityRule; 3] = [
     RarityRule {
         rarity: Rarity::Common,
-        selection_weight: 5_800,
+        selection_weight: 7_000,
         maximum_supply: 10_000,
     },
     RarityRule {
-        rarity: Rarity::Uncommon,
-        selection_weight: 2_700,
-        maximum_supply: 4_000,
-    },
-    RarityRule {
         rarity: Rarity::Rare,
-        selection_weight: 1_100,
+        selection_weight: 2_500,
         maximum_supply: 1_000,
     },
     RarityRule {
-        rarity: Rarity::Legendary,
-        selection_weight: 350,
-        maximum_supply: 200,
-    },
-    RarityRule {
-        rarity: Rarity::Mythic,
-        selection_weight: 50,
-        maximum_supply: 25,
+        rarity: Rarity::SuperRare,
+        selection_weight: 500,
+        maximum_supply: 100,
     },
 ];
 
@@ -151,10 +165,18 @@ mod tests {
     use super::*;
     #[test]
     fn rarity_is_protocol_meaningful() {
-        for pair in VERSION_1_RARITY_RULES.windows(2) {
+        assert_eq!(Rarity::ALL.len(), 3);
+        for pair in DEFAULT_RARITY_RULES.windows(2) {
             assert!(pair[0].selection_weight > pair[1].selection_weight);
             assert!(pair[0].maximum_supply > pair[1].maximum_supply);
         }
+        assert_eq!(
+            DEFAULT_RARITY_RULES
+                .iter()
+                .map(|rule| rule.selection_weight)
+                .sum::<u32>(),
+            10_000
+        );
     }
     #[test]
     fn specialized_classes_form_a_fair_closed_loop() {

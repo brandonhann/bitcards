@@ -1,7 +1,7 @@
 use bitcards::{
     canonical::{hash_hex, serialize},
-    generator::CardGenerator,
-    model::{CardClass, TYPE_ADVANTAGE_DAMAGE_BONUS},
+    generator::{CURRENT_GENERATOR_VERSION, CardGenerator},
+    model::{CardAction, CardClass, TYPE_ADVANTAGE_DAMAGE_BONUS},
 };
 
 #[test]
@@ -69,6 +69,22 @@ fn generator_has_a_locked_version_one_vector() {
     assert_eq!(
         hash_hex(&card.hash),
         "58de84523f07c6e1369d5ff055882d9390365bdae8ae18c72a1975b5788fbefa"
+    );
+}
+
+#[test]
+fn generator_has_a_locked_version_two_vector() {
+    let card = CardGenerator::default()
+        .generate(CURRENT_GENERATOR_VERSION, &[0; 32], &[3])
+        .unwrap();
+    assert_eq!(card.generator_version, 2);
+    assert_eq!(card.class, CardClass::Robot);
+    assert_eq!(card.name, "NANOBOT");
+    assert_eq!(card.actions.len(), 2);
+    assert!(matches!(card.actions[0], CardAction::Ability { .. }));
+    assert_eq!(
+        hash_hex(&card.hash),
+        "e5acdac2947e22e692a19739c179f8a9c3a442e097c14a2c9b8d0f8c1efe921f"
     );
 }
 
